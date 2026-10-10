@@ -18,25 +18,32 @@ let liveState = {
 let lastAlertSignal = 'HOLD';
 
 // Uses GET query parameters: completely avoids HTTP header encoding errors
+// Standard POST with clean ASCII headers
 function sendPhoneAlert(message, title = 'Kalshi Alert') {
   const cleanTitle = title.replace(/[^\x00-\x7F]/g, '').trim();
   const cleanMsg = message.replace(/[^\x00-\x7F]/g, '').trim();
-  const urlPath = `/${NTFY_TOPIC}?message=${encodeURIComponent(cleanMsg)}&title=${encodeURIComponent(cleanTitle)}&priority=urgent&tags=chart_with_upwards_trend`;
 
-  const req = https.get({
+  const options = {
     hostname: 'ntfy.sh',
     port: 443,
-    path: urlPath
-  }, (res) => {
-    // Alert processed
+    path: `/${NTFY_TOPIC}`,
+    method: 'POST',
+    headers: {
+      'Title': cleanTitle,
+      'Priority': 'urgent',
+      'Content-Type': 'text/plain',
+      'Content-Length': Buffer.byteLength(cleanMsg)
+    }
+  };
+
+  const req = https.request(options, (res) => {
+    console.log(`ntfy alert dispatched, response status: ${res.statusCode}`);
   });
 
   req.on('error', (err) => console.error('Alert Error:', err.message));
+  req.write(cleanMsg);
+  req.end();
 }
-
-// US-compatible Coinbase live price stream
-function connectCoinbase() {
-  const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
 
   ws.on('open', () => {
     console.log('Connected to Coinbase live BTC ticker');
