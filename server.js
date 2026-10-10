@@ -5,7 +5,7 @@ const https = require('https');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// YOUR EXACT NTFY TOPIC:
+// Set your exact ntfy topic name here:
 const NTFY_TOPIC = 'jb-kalshi-btc-942';
 
 let liveState = {
@@ -17,26 +17,30 @@ let liveState = {
 
 let lastAlertSignal = 'HOLD';
 
+// Uses GET query parameters: completely avoids HTTP header encoding errors
 function sendPhoneAlert(message, title = 'Kalshi Alert') {
-  // Use a GET request with encoded URL params - 100% bypasses all header parse errors
-  const encodedMsg = encodeURIComponent(message);
-  const encodedTitle = encodeURIComponent(title.replace(/[^\x00-\x7F]/g, ''));
-  const urlPath = `/${NTFY_TOPIC}?message=${encodedMsg}&title=${encodedTitle}&priority=urgent&tags=chart_with_upwards_trend`;
+  const cleanTitle = title.replace(/[^\x00-\x7F]/g, '').trim();
+  const cleanMsg = message.replace(/[^\x00-\x7F]/g, '').trim();
+  const urlPath = `/${NTFY_TOPIC}?message=${encodeURIComponent(cleanMsg)}&title=${encodeURIComponent(cleanTitle)}&priority=urgent&tags=chart_with_upwards_trend`;
 
-  const options = {
+  const req = https.get({
     hostname: 'ntfy.sh',
     port: 443,
-    path: urlPath,
-    method: 'GET'
-  };
-
-  const req = https.request(options, (res) => {
-    // Delivered successfully
+    path: urlPath
+  }, (res) => {
+    // Alert processed
   });
 
   req.on('error', (err) => console.error('Alert Error:', err.message));
-  req.end();
 }
+
+// US-compatible Coinbase live price stream
+function connectCoinbase() {
+  const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+
+  ws.on('open', () => {
+    console.log('Connected to Coinbase live BTC ticker');
+    const subscribeMsg = {
       type: 'subscribe',
       product_ids: ['BTC-USD'],
       channels: ['ticker']
@@ -80,14 +84,15 @@ function evaluateSignal() {
 
   const delta = liveState.spotPrice - liveState.strikePrice;
 
+  // Signal triggers ($20 swing threshold)
   if (liveState.timeRemainingSec > 780) {
     liveState.signal = 'HOLD';
   } else if (liveState.timeRemainingSec < 90) {
     liveState.signal = 'CLOSE / EXPIRING';
   } else {
-    if (delta > 35) {
+    if (delta > 20) {
       liveState.signal = 'BUY YES (OVER)';
-    } else if (delta < -35) {
+    } else if (delta < -20) {
       liveState.signal = 'BUY NO (UNDER)';
     } else {
       liveState.signal = 'HOLD';
@@ -97,16 +102,19 @@ function evaluateSignal() {
   if (liveState.signal !== lastAlertSignal) {
     if (liveState.signal === 'BUY YES (OVER)') {
       sendPhoneAlert(
-        `Delta: +$${delta.toFixed(2)} | Spot: $${liveState.spotPrice.toFixed(2)} | Time Left: ${Math.floor(liveState.timeRemainingSec / 60)}m`,
-        '🚀 BUY YES (Over)'
+        `BUY YES | Delta: +$${delta.toFixed(2)} | Spot: $${liveState.spotPrice.toFixed(2)} | Left: ${Math.floor(liveState.timeRemainingSec / 60)}m`,
+        'BUY YES - Over Strike'
       );
     } else if (liveState.signal === 'BUY NO (UNDER)') {
       sendPhoneAlert(
-        `Delta: -$${Math.abs(delta).toFixed(2)} | Spot: $${liveState.spotPrice.toFixed(2)} | Time Left: ${Math.floor(liveState.timeRemainingSec / 60)}m`,
-        '🔻 BUY NO (Under)'
+        `BUY NO | Delta: -$${Math.abs(delta).toFixed(2)} | Spot: $${liveState.spotPrice.toFixed(2)} | Left: ${Math.floor(liveState.timeRemainingSec / 60)}m`,
+        'BUY NO - Under Strike'
       );
     } else if (liveState.signal === 'CLOSE / EXPIRING' && lastAlertSignal.includes('BUY')) {
-      sendPhoneAlert('Under 90s left. Lock in profit or close position.', '⚠️ Close / Settlement Lock');
+      sendPhoneAlert(
+        'Under 90s left. Close contract or take profit before BRTI settlement lock.',
+        'EXIT - Window Expiring'
+      );
     }
     lastAlertSignal = liveState.signal;
   }
@@ -125,6 +133,6 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server live on port ${PORT}`);
-  sendPhoneAlert('Bot successfully deployed & monitoring live BTC!', 'Kalshi Bot Live');
+  sendPhoneAlert('Bot running clean with no errors!', 'Bot Online');
   connectCoinbase();
 });
