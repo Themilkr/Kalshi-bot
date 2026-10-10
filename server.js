@@ -3,9 +3,9 @@ const WebSocket = require('ws');
 const https = require('https');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// REPLACE THIS WITH YOUR EXACT NTFY TOPIC NAME:
+// YOUR EXACT NTFY TOPIC:
 const NTFY_TOPIC = 'jb-kalshi-btc-942';
 
 let liveState = {
@@ -31,19 +31,46 @@ function sendPhoneAlert(message, title = 'Kalshi BTC Alert') {
   };
 
   const req = https.request(options);
-  req.on('error', (err) => console.error(err.message));
+  req.on('error', (err) => console.error('Alert Error:', err.message));
   req.write(message);
   req.end();
 }
 
-// Connect to Binance live BTC feed
-const binanceWs = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+// Connect to Coinbase Exchange WebSocket (US-compliant, allowed on cloud servers)
+function connectCoinbase() {
+  const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
 
-binanceWs.on('message', (data) => {
-  const parsed = JSON.parse(data);
-  liveState.spotPrice = parseFloat(parsed.c);
-  evaluateSignal();
-});
+  ws.on('open', () => {
+    console.log('Connected to Coinbase live BTC ticker');
+    const subscribeMsg = {
+      type: 'subscribe',
+      product_ids: ['BTC-USD'],
+      channels: ['ticker']
+    };
+    ws.send(JSON.stringify(subscribeMsg));
+  });
+
+  ws.on('message', (data) => {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed.type === 'ticker' && parsed.price) {
+        liveState.spotPrice = parseFloat(parsed.price);
+        evaluateSignal();
+      }
+    } catch (e) {
+      console.error('Parse error:', e.message);
+    }
+  });
+
+  ws.on('error', (err) => {
+    console.error('Coinbase WS error:', err.message);
+  });
+
+  ws.on('close', () => {
+    console.log('Coinbase WS closed, reconnecting in 3 seconds...');
+    setTimeout(connectCoinbase, 3000);
+  });
+}
 
 function evaluateSignal() {
   const now = new Date();
@@ -91,9 +118,19 @@ function evaluateSignal() {
   }
 }
 
-app.get('/', (req, res) => res.send('Bot is active and running 24/7!'));
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    spotPrice: liveState.spotPrice,
+    strikePrice: liveState.strikePrice,
+    delta: (liveState.spotPrice - liveState.strikePrice).toFixed(2),
+    signal: liveState.signal,
+    timeRemainingSec: liveState.timeRemainingSec
+  });
+});
 
-app.listen(PORT, () => {
-  console.log(`Server started on port ${PORT}`);
-  sendPhoneAlert('Bot deployed and live! Monitoring BTC 15m windows.', 'Kalshi Bot Online');
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server live on port ${PORT}`);
+  sendPhoneAlert('Bot successfully deployed & monitoring live BTC!', 'Kalshi Bot Live');
+  connectCoinbase();
 });
