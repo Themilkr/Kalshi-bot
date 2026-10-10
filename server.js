@@ -17,32 +17,26 @@ let liveState = {
 
 let lastAlertSignal = 'HOLD';
 
-function sendPhoneAlert(message, title = 'Kalshi BTC Alert') {
+function sendPhoneAlert(message, title = 'Kalshi Alert') {
+  // Use a GET request with encoded URL params - 100% bypasses all header parse errors
+  const encodedMsg = encodeURIComponent(message);
+  const encodedTitle = encodeURIComponent(title.replace(/[^\x00-\x7F]/g, ''));
+  const urlPath = `/${NTFY_TOPIC}?message=${encodedMsg}&title=${encodedTitle}&priority=urgent&tags=chart_with_upwards_trend`;
+
   const options = {
     hostname: 'ntfy.sh',
     port: 443,
-    path: `/${NTFY_TOPIC}`,
-    method: 'POST',
-    headers: {
-      'Title': title,
-      'Priority': 'urgent',
-      'Tags': 'chart_with_upwards_trend'
-    }
+    path: urlPath,
+    method: 'GET'
   };
 
-  const req = https.request(options);
+  const req = https.request(options, (res) => {
+    // Delivered successfully
+  });
+
   req.on('error', (err) => console.error('Alert Error:', err.message));
-  req.write(message);
   req.end();
 }
-
-// Connect to Coinbase Exchange WebSocket (US-compliant, allowed on cloud servers)
-function connectCoinbase() {
-  const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
-
-  ws.on('open', () => {
-    console.log('Connected to Coinbase live BTC ticker');
-    const subscribeMsg = {
       type: 'subscribe',
       product_ids: ['BTC-USD'],
       channels: ['ticker']
